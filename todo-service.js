@@ -9,5 +9,11 @@
     const timestamp = now(); const status = input.status || 'SELF'; if (!STATUSES.includes(status)) throw new Error('状態が不正です。');
     return Object.assign({ todo_id: uuid(), body, status, source_person: null, target_person: null, due_date: null, delegated_to: null, delegated_at: null, report_due_date: null, report_received: false, report_received_at: null, report_content: null, completed_at: status === 'COMPLETED' ? timestamp : null, created_at: timestamp, updated_at: timestamp, revision: 1, is_deleted: false, deleted_at: null }, input || {}, { body, status, due_date: date(input && input.due_date) });
   }
-  global.todoService = { STATUSES, now, createTodo };
+  function validateTodo(todo) {
+    const value = createTodo(todo);
+    if (todo.is_deleted && !todo.deleted_at) throw new Error('削除日時が不正です。');
+    if (todo.status === 'COMPLETED' && !todo.completed_at) throw new Error('完了日時が不正です。');
+    return value;
+  }
+  global.todoService = { STATUSES, now, createTodo, validateTodo, MAX_TEXT_LENGTH: 5000 };
 }(window));
