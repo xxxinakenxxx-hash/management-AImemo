@@ -38,7 +38,7 @@
     const Speech = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!Speech) { $('speech-start').disabled = true; speechStatus('このブラウザでは音声入力を利用できません。文字入力をご利用ください。', true); return; }
     speechSession = { processedResultCount: 0, lastFinalTranscript: '' };
-    recognition = new Speech(); recognition.lang = 'ja-JP'; recognition.continuous = true; recognition.interimResults = true;
+    recognition = new Speech(); recognition.lang = 'ja-JP'; recognition.continuous = false; recognition.interimResults = true;
     recognition.onstart = () => { speechRunning = true; $('speech-start').disabled = true; $('speech-stop').disabled = false; speechStatus('認識中です。'); };
     recognition.onresult = consumeSpeechResults;
     recognition.onerror = (event) => speechError(event.error);
