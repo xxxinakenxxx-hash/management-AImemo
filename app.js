@@ -4,7 +4,7 @@
   const $ = (id) => document.getElementById(id);
   let store; let state = 'SELF'; let todos = []; let readOnly = false; let selectedTodo = null;
   let token = new URLSearchParams(location.hash.slice(1)).get('token') || sessionStorage.getItem('management_ai_memo_token') || '';
-  let recognition = null; let speechRunning = false;
+  let recognition = null; let speechRunning = false; let speechSession = null;
   const status = (text, error) => { $('status').textContent = text || ''; $('status').className = error ? 'error' : ''; };
   const speechStatus = (text, error) => { $('speech-state').textContent = text || ''; $('speech-state').className = error ? 'speech-state error' : 'speech-state'; };
   function persistToken() { if (token) { sessionStorage.setItem('management_ai_memo_token', token); history.replaceState(null, '', location.pathname + location.search); } }
@@ -12,6 +12,21 @@
     const value = String(text || '').trim(); if (!value) return;
     const input = $('input'); input.value = input.value ? `${input.value}${input.value.endsWith('\n') ? '' : ' '}${value}` : value;
     store.saveDraft(input.value).catch(() => status('音声結果を下書き保存できません。入力内容は保持しています。', true));
+  }
+  function consumeSpeechResults(event) {
+    if (!speechSession) return;
+    if (speechSession.processedResultCount > event.results.length) speechSession.processedResultCount = 0;
+    for (let i = speechSession.processedResultCount; i < event.results.length; i += 1) {
+      if (!event.results[i].isFinal) continue;
+      const transcript = String(event.results[i][0].transcript || '').trim();
+      const previous = speechSession.lastFinalTranscript;
+      let addition = transcript;
+      if (previous && transcript === previous) addition = '';
+      else if (previous && transcript.startsWith(previous)) addition = transcript.slice(previous.length);
+      appendFinalTranscript(addition);
+      speechSession.lastFinalTranscript = transcript;
+      speechSession.processedResultCount = i + 1;
+    }
   }
   function speechError(error) {
     const messages = { 'not-allowed': 'マイクの権限が拒否されました。権限を許可するか、文字入力をご利用ください。', 'service-not-allowed': '音声認識が許可されていません。文字入力をご利用ください。', 'audio-capture': 'マイクを利用できません。文字入力をご利用ください。', network: '音声認識の通信でエラーが発生しました。入力内容は保持しています。', aborted: '音声入力を停止しました。' };
@@ -22,11 +37,12 @@
     if (readOnly || speechRunning) return;
     const Speech = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!Speech) { $('speech-start').disabled = true; speechStatus('このブラウザでは音声入力を利用できません。文字入力をご利用ください。', true); return; }
+    speechSession = { processedResultCount: 0, lastFinalTranscript: '' };
     recognition = new Speech(); recognition.lang = 'ja-JP'; recognition.continuous = true; recognition.interimResults = true;
     recognition.onstart = () => { speechRunning = true; $('speech-start').disabled = true; $('speech-stop').disabled = false; speechStatus('認識中です。'); };
-    recognition.onresult = (event) => { for (let i = event.resultIndex; i < event.results.length; i += 1) if (event.results[i].isFinal) appendFinalTranscript(event.results[i][0].transcript); };
+    recognition.onresult = consumeSpeechResults;
     recognition.onerror = (event) => speechError(event.error);
-    recognition.onend = () => { speechRunning = false; $('speech-start').disabled = readOnly; $('speech-stop').disabled = true; if (!$('speech-state').classList.contains('error')) speechStatus('音声入力を停止しました。'); store.saveDraft($('input').value).catch(() => {}); };
+    recognition.onend = () => { speechRunning = false; speechSession = null; $('speech-start').disabled = readOnly; $('speech-stop').disabled = true; if (!$('speech-state').classList.contains('error')) speechStatus('音声入力を停止しました。'); store.saveDraft($('input').value).catch(() => {}); };
     try { recognition.start(); } catch (error) { speechError(error.name || 'start-failed'); }
   }
   function renderTabs() { $('tabs').replaceChildren(...tabs.map(([key, label]) => { const b = document.createElement('button'); b.textContent = label; b.className = key === state ? '' : 'secondary'; b.onclick = () => { state = key; render(); }; return b; })); }
