@@ -1,8 +1,9 @@
 (function () {
   'use strict';
   const tabs = [['SELF', '自分'], ['DELEGATED', '振る'], ['HOLD', '保留'], ['COMPLETED', '完了']];
+  const RENDER_PAGE_SIZE = 100;
   const $ = (id) => document.getElementById(id);
-  let store; let state = 'SELF'; let todos = []; let readOnly = false; let selectedTodo = null;
+  let store; let state = 'SELF'; let todos = []; let readOnly = false; let selectedTodo = null; let renderLimit = RENDER_PAGE_SIZE;
   let token = new URLSearchParams(location.hash.slice(1)).get('token') || sessionStorage.getItem('management_ai_memo_token') || '';
   let recognition = null; let speechRunning = false; let speechSession = null;
   const status = (text, error) => { $('status').textContent = text || ''; $('status').className = error ? 'error' : ''; };
@@ -45,7 +46,7 @@
     recognition.onend = () => { speechRunning = false; speechSession = null; $('speech-start').disabled = readOnly; $('speech-stop').disabled = true; if (!$('speech-state').classList.contains('error')) speechStatus('音声入力を停止しました。'); store.saveDraft($('input').value).catch(() => {}); };
     try { recognition.start(); } catch (error) { speechError(error.name || 'start-failed'); }
   }
-  function renderTabs() { $('tabs').replaceChildren(...tabs.map(([key, label]) => { const b = document.createElement('button'); b.textContent = label; b.className = key === state ? '' : 'secondary'; b.onclick = () => { state = key; render(); }; return b; })); }
+  function renderTabs() { $('tabs').replaceChildren(...tabs.map(([key, label]) => { const b = document.createElement('button'); b.textContent = label; b.className = key === state ? '' : 'secondary'; b.onclick = () => { state = key; renderLimit = RENDER_PAGE_SIZE; render(); }; return b; })); }
   function operationText(todo) { const values = [['本文', todo.body], ['誰から', todo.source_person], ['誰に', todo.target_person], ['期限', todo.due_date], ['振った相手', todo.delegated_to], ['報告期限', todo.report_due_date], ['報告内容', todo.report_content]]; return values.filter(([, value]) => value).map(([label, value]) => `${label}: ${value}`).join('\n'); }
   function todoSubject(todo) { return `【TODO】${String(todo.body || '').slice(0, 80)}`; }
   function todoMailBody(todo) { return operationText(todo); }
@@ -66,11 +67,15 @@
   function openTodoMenu(todo) { selectedTodo = todo; const dialog = $('todo-actions'); if (dialog.showModal) dialog.showModal(); else dialog.hidden = false; }
   function render() {
     renderTabs(); const list = $('list'); list.replaceChildren();
-    todos.filter((todo) => todo.status === state).forEach((todo) => {
+    const filtered = todos.filter((todo) => todo.status === state);
+    filtered.slice(0, renderLimit).forEach((todo) => {
       const item = document.createElement('article'); item.className = 'todo'; const body = document.createElement('textarea'); body.value = todo.body; body.readOnly = readOnly; body.onchange = () => update(todo, { body: body.value });
       const fields = document.createElement('div'); fields.className = 'fields'; [['source_person', '誰から'], ['target_person', '誰に'], ['delegated_to', '委任先'], ['due_date', '期限'], ['report_due_date', '報告期限'], ['report_content', '報告内容']].forEach(([key, placeholder]) => { const input = document.createElement(key === 'report_content' ? 'textarea' : 'input'); input.placeholder = placeholder; input.value = todo[key] || ''; if (key.endsWith('_date')) input.type = 'date'; input.disabled = readOnly; input.onchange = () => update(todo, { [key]: input.value || null }); fields.appendChild(input); });
       const controls = document.createElement('div'); const select = document.createElement('select'); select.disabled = readOnly; tabs.forEach(([key, label]) => { const option = document.createElement('option'); option.value = key; option.textContent = label; option.selected = key === todo.status; select.appendChild(option); }); select.onchange = () => update(todo, { status: select.value, completed_at: select.value === 'COMPLETED' ? new Date().toISOString() : null }); const menu = document.createElement('button'); menu.textContent = '…'; menu.className = 'secondary'; menu.disabled = readOnly; menu.onclick = () => openTodoMenu(todo); const del = document.createElement('button'); del.textContent = '削除'; del.className = 'danger'; del.disabled = readOnly; del.onclick = () => { if (confirm('このTODOを削除しますか？')) update(todo, { is_deleted: true, deleted_at: new Date().toISOString() }); }; controls.append(select, menu, del); item.append(body, fields, controls); list.appendChild(item);
     });
+    if (filtered.length > renderLimit) {
+      const more = document.createElement('button'); more.type = 'button'; more.className = 'secondary'; more.textContent = `さらに表示（残り${filtered.length - renderLimit}件）`; more.onclick = () => { renderLimit += RENDER_PAGE_SIZE; render(); }; list.appendChild(more);
+    }
   }
   async function update(todo, patch) { const before = { ...todo }; Object.assign(todo, patch); try { await store.save(todo); render(); status('保存しました。'); } catch (error) { Object.assign(todo, before); render(); status('保存に失敗しました。入力値は保持しています。', true); } }
   async function register() { if (readOnly) return; const value = $('input').value; if (!value.trim()) return status('本文を入力してください。', true); try { const todo = todoService.createTodo({ body: value }); await store.save(todo); todos.push(todo); $('input').value = ''; await store.saveDraft(''); render(); status('そのまま登録しました。'); } catch (error) { status(error.message || '保存に失敗しました。入力と下書きを保持しています。', true); } }
